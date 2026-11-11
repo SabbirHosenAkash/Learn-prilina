@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#087f70">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<title>Best Cleaner – Telegram Sender</title>
+<style>
+:root{--bg:#f5f7fa;--card:#fff;--ink:#172033;--teal:#087f70;--gray:#6b7280;--line:#d7dde5;--warn:#f59e0b;--ok:#0a8f5a;--err:#c0392b}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1720;--card:#18222e;--ink:#e8edf3;--gray:#98a4b3;--line:#2b3846}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,sans-serif;padding:14px 16px;max-width:560px;margin-inline:auto;padding-bottom:30px}
+h1{font-size:23px;margin:10px 0 2px}
+.sub{color:var(--gray);margin:0 0 14px;font-size:14px}
+.card{background:var(--card);border-radius:16px;padding:14px 16px;margin-bottom:12px}
+label{display:block;font-size:12px;color:var(--gray);margin:10px 0 4px;font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+label:first-child{margin-top:0}
+input,textarea{width:100%;padding:11px 13px;border:1.5px solid var(--line);border-radius:11px;background:transparent;color:var(--ink);font-size:16px;outline:none;transition:border-color .2s}
+input:focus,textarea:focus{border-color:var(--teal)}
+textarea{min-height:120px;resize:vertical;font-family:inherit}
+.row{display:flex;gap:8px;margin-top:10px}
+button{flex:1;padding:12px 10px;border-radius:12px;border:1.5px solid var(--teal);background:transparent;color:var(--teal);font-size:15px;font-weight:600;cursor:pointer;transition:opacity .15s}
+button.primary{background:var(--teal);color:#fff;border-color:var(--teal)}
+button:disabled{opacity:.4;cursor:default}
+button:active:not(:disabled){opacity:.7}
+#queue-banner{display:none;background:#fff8e1;border:1.5px solid var(--warn);border-radius:14px;padding:12px 14px;margin-bottom:12px;font-size:14px;color:#92610a}
+#queue-banner span{font-weight:700}
+#status{margin:6px 2px;font-size:14px;min-height:20px;white-space:pre-wrap}
+.ok{color:var(--ok)}.err{color:var(--err)}.info{color:var(--gray)}
+small{color:var(--gray);display:block;margin-top:10px;font-size:12.5px;line-height:1.5}
+.badge{display:inline-block;background:var(--teal);color:#fff;border-radius:99px;padding:1px 8px;font-size:11px;font-weight:700;vertical-align:middle;margin-left:5px}
+#install-btn{display:none;width:100%;margin-bottom:12px;border-color:#6366f1;color:#6366f1}
+</style>
+</head>
+<body>
+
+<h1>Best Cleaner</h1>
+<p class="sub">Telegram bot-e message pathao – Prilina shikhe nebe</p>
+
+<button id="install-btn">📲 Home screen-e add koro (install)</button>
+
+<div id="queue-banner">
+  ⏳ <span id="q-count">0</span> ta message pending — internet paile nijei pathabe
+  <div class="row" style="margin-top:8px">
+    <button id="retry-btn" style="border-color:var(--warn);color:var(--warn)">Ekhon retry koro</button>
+    <button id="clear-btn" style="border-color:var(--err);color:var(--err)">Queue clear</button>
+  </div>
+</div>
+
+<div class="card">
+  <label for="token">Bot Token</label>
+  <input id="token" type="password" autocomplete="off" placeholder="123456789:AAxxxx...">
+  <label for="chat">Chat ID</label>
+  <input id="chat" inputmode="numeric" autocomplete="off" placeholder="Niche 'Find chat ID' chap dao">
+  <div class="row">
+    <button id="test-btn">🔍 Test bot</button>
+    <button id="find-btn">📋 Find chat ID</button>
+  </div>
+  <small>⚠️ Token shudhu tomar phone-e save hoy (IndexedDB). GitHub repo-te jayna.</small>
+</div>
+
+<div class="card">
+  <label for="label">Label (optional)</label>
+  <input id="label" placeholder="jemon: office, friend chat">
+  <label for="text">Message</label>
+  <textarea id="text" placeholder="Ekhane type koro&#10;— othoba onno app theke Share → Best Cleaner"></textarea>
+  <div class="row">
+    <button id="send-btn" class="primary" disabled>📤 Send to Telegram</button>
+  </div>
+  <div class="row">
+    <button id="tg-btn">💬 Telegram app diye pathao</button>
+  </div>
+  <small>
+    💡 <b>"Telegram app diye pathao"</b> tomar nijer account theke message jay — Prilina bot hishebe sheta porte pare.<br>
+    💡 <b>"Send to Telegram"</b> bot API diye pathay (direct, fast). Tab band hole-o pending queue theke pathabe.
+  </small>
+</div>
+
+<div id="status" class="info"></div>
+
+<script>
+/* ═══ IndexedDB helpers ═══ */
+let _db = null;
+function openDB() {
+  if (_db) return Promise.resolve(_db);
+  return new Promise((res, rej) => {
+    const r = indexedDB.open('bestcleaner', 1);
+    r.onupgradeneeded = e => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+      if (!db.objectStoreNames.contains('queue')) db.createObjectStore('queue', {keyPath:'id',autoIncrement:true});
+    };
+    r.onsuccess = e => { _db = e.target.result; res(_db); };
+    r.onerror = e => rej(e.target.error);
+  });
+}
+const idb = {
+  async get(store, key) { const db=await openDB(); return new Promise((res,rej)=>{const r=db.transaction(store,'readonly').objectStore(store).get(key);r.onsuccess=()=>res(r.result);r.onerror=e=>rej(e.target.error);}); },
+  async put(store, key, val) { const db=await openDB(); return new Promise((res,rej)=>{const r=db.transaction(store,'readwrite').objectStore(store).put(val,key);r.onsuccess=()=>res();r.onerror=e=>rej(e.target.error);}); },
+  async add(store, val) { const db=await openDB(); return new Promise((res,rej)=>{const r=db.transaction(store,'readwrite').objectStore(store).add(val);r.onsuccess=()=>res(r.result);r.onerror=e=>rej(e.target.error);}); },
+  async getAll(store) { const db=await openDB(); return new Promise((res,rej)=>{const r=db.transaction(store,'readonly').objectStore(store).getAll();r.onsuccess=()=>res(r.result);r.onerror=e=>rej(e.target.error);}); },
+  async delete(store, key) { const db=await openDB(); return new Promise((res,rej)=>{const r=db.transaction(store,'readwrite').objectStore(store).delete(key);r.onsuccess=()=>res();r.onerror=e=>rej(e.target.error);}); },
+  async clear(store) { const db=await openDB(); return new Promise((res,rej)=>{const r=db.transaction(store,'readwrite').objectStore(store).clear();r.onsuccess=()=>res();r.onerror=e=>rej(e.target.error);}); },
+};
+
+/* ═══ Telegram helpers ═══ */
+const TOKEN_RE = /^\d{6,12}:[A-Za-z0-9_-]{30,50}$/;
+async function tgPost(token, method, payload={}) {
+  const r = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
+  });
+  let j; try{ j=await r.json(); }catch(e){ j={ok:false,description:'HTTP '+r.status}; }
+  return j;
+}
+async function sendNow(token, chatId, text) {
+  for (let i=0; i<text.length; i+=4000) {
+    const j = await tgPost(token, 'sendMessage', {chat_id:chatId, text:text.slice(i,i+4000)});
+    if (!j.ok) throw new Error(j.description || 'Unknown error');
+  }
+}
+
+/* ═══ Queue management ═══ */
+async function addToQueue(text) {
+  const id = await idb.add('queue', {text, status:'pending', time:Date.now()});
+  return id;
+}
+async function flushQueue() {
+  const token = await idb.get('kv','token') || '';
+  const chatId = await idb.get('kv','chatId') || '';
+  if (!token || !chatId) return 0;
+  const items = (await idb.getAll('queue')).filter(x=>x.status==='pending');
+  let sent = 0;
+  for (const item of items) {
+    try { await sendNow(token, chatId, item.text); await idb.delete('queue', item.id); sent++; }
+    catch(e) {}
+  }
+  return sent;
+}
+async function getQueueCount() {
+  const items = await idb.getAll('queue');
+  return items.filter(x=>x.status==='pending').length;
+}
+async function refreshQueueBanner() {
+  const n = await getQueueCount();
+  const banner = document.getElementById('queue-banner');
+  if (n > 0) { banner.style.display='block'; document.getElementById('q-count').textContent=n; }
+  else banner.style.display='none';
+}
+
+/* ═══ UI helpers ═══ */
+const $ = id => document.getElementById(id);
+function say(msg, cls='info') { const s=$('status'); s.textContent=msg; s.className=cls; }
+
+/* ═══ Init: load saved settings ═══ */
+(async () => {
+  $('token').value = await idb.get('kv','token') || '';
+  $('chat').value  = await idb.get('kv','chatId') || '';
+  updateSendBtn();
+  await refreshQueueBanner();
+})();
+
+/* Input persistence */
+$('token').addEventListener('input', () => { const v=$('token').value.trim(); idb.put('kv','token',v); updateSendBtn(); });
+$('chat').addEventListener('input', () => { const v=$('chat').value.trim(); idb.put('kv','chatId',v); updateSendBtn(); });
+$('text').addEventListener('input', updateSendBtn);
+
+function updateSendBtn() {
+  const ok = TOKEN_RE.test($('token').value.trim()) && $('chat').value.trim() && $('text').value.trim();
+  $('send-btn').disabled = !ok;
+}
+
+/* ═══ Share Target: ?text= in URL ═══ */
+(function(){
+  const p = new URLSearchParams(location.search);
+  const t = [p.get('title'),p.get('text'),p.get('url')].filter(Boolean).join('\n');
+  if(t){ $('text').value=t; history.replaceState(null,'',location.pathname); updateSendBtn(); }
+})();
+
+/* ═══ Test bot ═══ */
+$('test-btn').onclick = async () => {
+  const tok = $('token').value.trim();
+  if (!TOKEN_RE.test(tok)) return say('Token format thik na. Darao: 123456789:AAxxxx...','err');
+  say('Testing…');
+  try {
+    const j = await tgPost(tok,'getMe');
+    j.ok ? say('✅ Bot OK: @'+j.result.username,'ok') : say('❌ Token invalid: '+j.description,'err');
+  } catch(e){ say('❌ Network error: '+e.message,'err'); }
+};
+
+/* ═══ Find chat ID ═══ */
+$('find-btn').onclick = async () => {
+  const tok = $('token').value.trim();
+  if (!TOKEN_RE.test(tok)) return say('Age thik bot token dao.','err');
+  say('Searching…');
+  try {
+    const j = await tgPost(tok,'getUpdates');
+    if (!j.ok) return say('❌ Failed: '+j.description+' (onno jaygay webhook/polling cholle conflict hoy)','err');
+    const list = j.result || [];
+    for (let i=list.length-1; i>=0; i--) {
+      const chat = list[i].message?.chat;
+      if (chat) {
+        const id = String(chat.id);
+        $('chat').value = id;
+        await idb.put('kv','chatId',id);
+        updateSendBtn();
+        return say('✅ Chat ID pawa gese: '+id,'ok');
+      }
+    }
+    say('⚠️ Kono message nai. Telegram-e bot-ke /start pathao, tarpor retry koro.','err');
+  } catch(e){ say('❌ Network error: '+e.message,'err'); }
+};
+
+/* ═══ Send ═══ */
+$('send-btn').onclick = async () => {
+  const text = $('text').value;
+  const label = $('label').value.trim();
+  const full = label ? '['+label+']\n'+text : text;
+  const tok = $('token').value.trim();
+  const chatId = $('chat').value.trim();
+
+  $('send-btn').disabled = true;
+  say('Sending…');
+
+  /* Queue-e add koro */
+  await addToQueue(full);
+
+  /* Ekhuni pathano try koro */
+  try {
+    await sendNow(tok, chatId, full);
+    /* Success: queue clear (shudhu eta) */
+    const items = await idb.getAll('queue');
+    for (const item of items) { if (item.text === full) { await idb.delete('queue', item.id); break; } }
+    say('✅ Sent successfully!','ok');
+    $('text').value = '';
+  } catch(e) {
+    say('⚠️ Ekhon pathano jay nai — queue-e rakha holo. Internet paile SW nijei pathabe.','info');
+    /* Background Sync register */
+    if ('serviceWorker' in navigator && 'SyncManager' in window) {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        await reg.sync.register('bc-send');
+      } catch(err){}
+    }
+  }
+
+  await refreshQueueBanner();
+  updateSendBtn();
+};
+
+/* ═══ Retry button ═══ */
+$('retry-btn').onclick = async () => {
+  say('Retrying…');
+  const sent = await flushQueue();
+  await refreshQueueBanner();
+  say(sent ? '✅ '+sent+' ta message pathano holo','ok' : '⚠️ Pathano jay nai, abar try korbe.','err');
+};
+$('clear-btn').onclick = async () => {
+  if (!confirm('Queue clear korbe? Pending messages delete hoe jabe.')) return;
+  await idb.clear('queue');
+  await refreshQueueBanner();
+  say('Queue cleared.','info');
+};
+
+/* ═══ Telegram app share ═══ */
+$('tg-btn').onclick = () => {
+  const t = $('text').value;
+  if (!t.trim()) return say('Message khali.','err');
+  window.open('https://t.me/share/url?url=%20&text='+encodeURIComponent(t),'_blank');
+};
+
+/* ═══ SW messages (queue updated from background) ═══ */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', async e => {
+    if (e.data?.type === 'queue-updated') await refreshQueueBanner();
+  });
+}
+
+/* ═══ Service Worker registration ═══ */
+let deferredPrompt = null;
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').then(async reg => {
+    /* Periodic Background Sync (optional, browser decide korbe interval) */
+    if ('periodicSync' in reg) {
+      try {
+        const status = await navigator.permissions.query({name:'periodic-background-sync'});
+        if (status.state === 'granted') await reg.periodicSync.register('bc-periodic',{minInterval:60*60*1000});
+      } catch(e){}
+    }
+  }).catch(()=>{});
+}
+
+/* ═══ Install prompt ═══ */
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault(); deferredPrompt = e;
+  $('install-btn').style.display = 'block';
+});
+$('install-btn').onclick = async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  const {outcome} = await deferredPrompt.userChoice;
+  if (outcome === 'accepted') $('install-btn').style.display='none';
+  deferredPrompt = null;
+};
+window.addEventListener('appinstalled', () => { $('install-btn').style.display='none'; });
+</script>
+</body>
+</html>
